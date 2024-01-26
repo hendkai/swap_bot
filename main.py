@@ -3,11 +3,13 @@ import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-# Globale Variable für folder_entry und die Liste der ausgewählten Swap-Dateien
+# Globale Variablen
 folder_entry = None
 selected_swaps = []
-swap_checkboxes = []  # Definieren Sie swap_checkboxes als globale Variable
-swap_list = []  # Definieren Sie swap_list als globale Variable
+swap_checkboxes = []
+swap_list = []
+result_label = None
+frame = None
 
 def run_command(command):
     """ Executes a shell command with sudo and returns the result. """
@@ -36,8 +38,16 @@ def create_and_activate_swapfile(path, size, swappiness, priority, auto_priority
     run_command(f"chmod 0600 {swapfile_path}")
     run_command(f"mkswap {swapfile_path}")
     run_command(f"swapon {swapfile_path}")
+    add_swap_entry_to_fstab(swapfile_path)  # Add entry to /etc/fstab
+
+def add_swap_entry_to_fstab(swapfile_path):
+    """ Adds an entry for the swap file to /etc/fstab to activate it at boot. """
+    with open('/etc/fstab', 'a') as fstab:
+        fstab.write(f"{swapfile_path} none swap defaults 0 0\n")
 
 def delete_selected_swaps():
+    global result_label
+
     """ Deletes selected swap files. """
     for swap in selected_swaps:
         delete_swap_file(swap)
@@ -49,9 +59,20 @@ def delete_swap_file(path):
     """ Deactivates and deletes a swap file. """
     run_command(f"swapoff {path}")
     os.remove(path)
+    remove_swap_entry_from_fstab(path)  # Remove entry from /etc/fstab
+
+def remove_swap_entry_from_fstab(swapfile_path):
+    """ Removes the entry for the swap file from /etc/fstab. """
+    with open('/etc/fstab', 'r') as fstab:
+        lines = fstab.readlines()
+
+    with open('/etc/fstab', 'w') as fstab:
+        for line in lines:
+            if not line.startswith(swapfile_path):
+                fstab.write(line)
 
 def select_folder():
-    global folder_entry  # Verwenden Sie die globale folder_entry-Variable
+    global folder_entry
     selected_path = filedialog.askdirectory()
     folder_entry.delete(0, tk.END)
     folder_entry.insert(0, selected_path)
@@ -63,11 +84,35 @@ def toggle_swap(swap):
     else:
         selected_swaps.append(swap)
 
+def show_swappiness_info():
+    info_text = "Swappiness controls the tendency of the kernel to swap out processes' memory pages to the swap space. A lower value (e.g., 10) makes the kernel avoid swapping as much as possible, while a higher value (e.g., 100) makes the kernel more aggressive in swapping out memory. The default value is usually around 60-70."
+    show_info_window("Swappiness Info", info_text)
+
+def show_priority_info():
+    info_text = "Priority determines the order in which swap areas are used. A lower value (e.g., 1) gives the swap space higher priority, while a higher value (e.g., 32768) gives it lower priority. The default value is usually 32767."
+    show_info_window("Priority Info", info_text)
+
+def show_info_window(title, info_text):
+    info_window = tk.Toplevel(root)
+    info_window.title(title)
+    info_label = ttk.Label(info_window, text=info_text, wraplength=400, justify="left")
+    info_label.pack(padx=10, pady=10)
+
+def refresh_swap_list():
+    global frame
+    for checkbox in swap_checkboxes:
+        checkbox.destroy()
+    swap_list = list_swap_files().split("\n")
+    swap_checkboxes.clear()
+    for i, swap in enumerate(swap_list):
+        if swap:
+            swap_checkbox = ttk.Checkbutton(frame, text=swap, command=lambda s=swap: toggle_swap(s))
+            swap_checkbox.grid(row=9 + i, column=0, padx=10, pady=5, columnspan=2, sticky="w")
+            swap_checkboxes.append(swap_checkbox)
+
 def create_gui():
-    """ Creates the Tkinter GUI for Swap File Management. """
-    global folder_entry  # Deklarieren Sie folder_entry als global
-    global swap_checkboxes  # Deklarieren Sie swap_checkboxes als global
-    global swap_list  # Deklarieren Sie swap_list als global
+    global folder_entry, swap_checkboxes, swap_list, result_label, frame
+
     def create_and_activate():
         path = folder_entry.get()
         size = size_entry.get()
@@ -76,36 +121,11 @@ def create_gui():
         auto_priority = auto_priority_var.get()
         create_and_activate_swapfile(path, int(size), swappiness, priority, auto_priority)
         result_label.config(text="Swap file created and activated.")
-        refresh_swap_list()  # Refresh the list of swap files
-
-    def refresh_swap_list():
-        swap_list = list_swap_files().split("\n")
-        for checkbox in swap_checkboxes:
-            checkbox.destroy()
-        swap_checkboxes.clear()
-        for i, swap in enumerate(swap_list):
-            if swap:
-                swap_checkbox = ttk.Checkbutton(frame, text=swap, command=lambda s=swap: toggle_swap(s))
-                swap_checkbox.grid(row=8 + i, column=0, padx=10, pady=5, columnspan=2, sticky="w")
-                swap_checkboxes.append(swap_checkbox)
-
-    def show_swappiness_info():
-        info_text = "Swappiness controls the tendency of the kernel to swap out processes' memory pages to the swap space. A lower value (e.g., 10) makes the kernel avoid swapping as much as possible, while a higher value (e.g., 100) makes the kernel more aggressive in swapping out memory. The default value is usually around 60-70."
-        show_info_window("Swappiness Info", info_text)
-
-    def show_priority_info():
-        info_text = "Priority determines the order in which swap areas are used. A lower value (e.g., 1) gives the swap space higher priority, while a higher value (e.g., 32768) gives it lower priority. The default value is usually 32767."
-        show_info_window("Priority Info", info_text)
-
-    def show_info_window(title, info_text):
-        info_window = tk.Toplevel(root)
-        info_window.title(title)
-        info_label = ttk.Label(info_window, text=info_text, wraplength=400, justify="left")
-        info_label.pack(padx=10, pady=10)
+        refresh_swap_list()
 
     root = tk.Tk()
-    root.title("swap_bot")  # Setzen Sie den Titel des Tkinter-Fensters auf "swap_bot"
-    root.geometry("800x600+300+200")  # Setzen Sie die Fenstergröße und Position
+    root.title("swap_bot")
+    root.geometry("800x600+300+200")
 
     frame = ttk.Frame(root)
     frame.grid(row=0, column=0, padx=10, pady=10)
@@ -162,7 +182,7 @@ def create_gui():
     delete_selected_button = ttk.Button(frame, text="Delete Selected Swap Files", command=delete_selected_swaps)
     delete_selected_button.grid(row=6, column=2, columnspan=2, padx=10, pady=5)
 
-    root.mainloop()
+    root.mainloop() 
 
 if __name__ == "__main__":
     create_gui()
