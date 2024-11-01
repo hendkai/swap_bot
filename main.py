@@ -26,18 +26,12 @@ def list_swap_files():
 def create_and_activate_swapfile(path, size, swappiness, priority, auto_priority):
     """ Creates and activates a swap file with custom swappiness and priority on a BTRFS filesystem. """
     swapfile_path = os.path.join(path, f"swapfile_{size}M")
-    swappiness_command = f"sysctl vm.swappiness={swappiness}"
-    run_command(swappiness_command)
-    priority_command = f"sysctl vm.vfs_cache_pressure=50"  # Default value
+    swappiness_priority_command = f"sysctl vm.swappiness={swappiness} && sysctl vm.vfs_cache_pressure=50"
     if not auto_priority:
-        priority_command = f"sysctl vm.vfs_cache_pressure=50 && sysctl vm.admin_reserve_kbytes={priority * 32768}"
-    run_command(priority_command)
-    run_command(f"truncate -s 0 {swapfile_path}")
-    run_command(f"chattr +C {swapfile_path}")
-    run_command(f"fallocate -l {size}M {swapfile_path}")
-    run_command(f"chmod 0600 {swapfile_path}")
-    run_command(f"mkswap {swapfile_path}")
-    run_command(f"swapon {swapfile_path}")
+        swappiness_priority_command += f" && sysctl vm.admin_reserve_kbytes={priority * 32768}"
+    run_command(swappiness_priority_command)
+    os.truncate(swapfile_path, size * 1024 * 1024)
+    run_command(f"chattr +C {swapfile_path} && fallocate -l {size}M {swapfile_path} && chmod 0600 {swapfile_path} && mkswap {swapfile_path} && swapon {swapfile_path}")
     add_swap_entry_to_fstab(swapfile_path)  # Add entry to /etc/fstab
 
 def add_swap_entry_to_fstab(swapfile_path):
@@ -110,6 +104,31 @@ def refresh_swap_list():
             swap_checkbox.grid(row=9 + i, column=0, padx=10, pady=5, columnspan=2, sticky="w")
             swap_checkboxes.append(swap_checkbox)
 
+class ToolTip:
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tooltip = None
+        self.widget.bind("<Enter>", self.show_tooltip)
+        self.widget.bind("<Leave>", self.hide_tooltip)
+
+    def show_tooltip(self, event):
+        if self.tooltip:
+            return
+        x, y, _, _ = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 25
+        self.tooltip = tk.Toplevel(self.widget)
+        self.tooltip.wm_overrideredirect(True)
+        self.tooltip.wm_geometry(f"+{x}+{y}")
+        label = ttk.Label(self.tooltip, text=self.text, background="yellow", relief="solid", borderwidth=1, wraplength=200)
+        label.pack(ipadx=1)
+
+    def hide_tooltip(self, event):
+        if self.tooltip:
+            self.tooltip.destroy()
+            self.tooltip = None
+
 def create_gui():
     global folder_entry, swap_checkboxes, swap_list, result_label, frame
 
@@ -145,11 +164,15 @@ def create_gui():
     size_entry = ttk.Entry(frame, width=10)
     size_entry.grid(row=1, column=1, padx=10, pady=5)
 
+    ToolTip(size_entry, "Enter the size of the swap file in megabytes (MB).")
+
     swappiness_label = ttk.Label(frame, text="Swappiness (0-100):")
     swappiness_label.grid(row=2, column=0, padx=10, pady=5)
 
     swappiness_entry = ttk.Entry(frame, width=10)
     swappiness_entry.grid(row=2, column=1, padx=10, pady=5)
+
+    ToolTip(swappiness_entry, "Enter the swappiness value (0-100). Lower values reduce swapping, higher values increase swapping.")
 
     swappiness_info_button = ttk.Button(frame, text="?", command=show_swappiness_info)
     swappiness_info_button.grid(row=2, column=2, padx=5, pady=5)
@@ -159,6 +182,8 @@ def create_gui():
 
     priority_entry = ttk.Entry(frame, width=10)
     priority_entry.grid(row=3, column=1, padx=10, pady=5)
+
+    ToolTip(priority_entry, "Enter the priority value (1-32768). Lower values give higher priority, higher values give lower priority.")
 
     auto_priority_var = tk.BooleanVar()
     auto_priority_var.set(False)
@@ -181,6 +206,18 @@ def create_gui():
 
     delete_selected_button = ttk.Button(frame, text="Delete Selected Swap Files", command=delete_selected_swaps)
     delete_selected_button.grid(row=6, column=2, columnspan=2, padx=10, pady=5)
+
+    # Step-by-step guide
+    guide_text = (
+        "Step-by-Step Guide:\n"
+        "1. Select a folder where the swap file should be created.\n"
+        "2. Enter the desired size of the swap file in megabytes (MB).\n"
+        "3. Adjust the swappiness (0-100) and priority (1-32768) settings for the swap file, or enable automatic priority settings.\n"
+        "4. Click the 'Create and Activate Swap' button to create and activate the swap file.\n"
+        "5. Select swap files from the list of existing ones and delete them using the 'Delete Selected Swap Files' button."
+    )
+    guide_label = ttk.Label(frame, text=guide_text, wraplength=400, justify="left")
+    guide_label.grid(row=7, column=0, columnspan=4, pady=10)
 
     root.mainloop() 
 
